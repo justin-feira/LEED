@@ -17,68 +17,31 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data_repository"
 
-def to_wide(df, building_code=None):
-    """
-    Transform data from long to wide format with separate potential and awarded columns
-    for each category, with integer dtypes.
-    """
-    ## if building code is not provided, assume we want the whole dataframe
-    if building_code is not None:
-        # Check if building_code is a list
-        if isinstance(building_code, list):
-            # Filter for multiple building codes
-            data_to_process = df[df['building_code'].isin(building_code)]
-            print(f"Filtered data shape for buildings {building_code}: {data_to_process.shape}")
-        else:
-            # Handle single building code
-            building_code = str(building_code)
-            data_to_process = df[df['building_code'] == building_code]
-            print(f"Filtered data shape for building {building_code}: {data_to_process.shape}")
-    else:
-        data_to_process = df
-        print(f"Using full dataframe shape: {data_to_process.shape}")
-    
-    if len(data_to_process) == 0:
-        print(f"No data found for building code(s): {building_code}")
-        return pd.DataFrame()
-    
-    ## select only relevant columns
-    required_cols = ['building_name', 'leed_version', 'cat_and_cat_name', 'potential_points', 'awarded_points']
-    data_to_process = data_to_process[required_cols]
-    
-    ## create separate pivot tables for potential and awarded points
-    potential_wide = data_to_process.pivot_table(
-        index=['building_name', 'leed_version'], 
-        columns='cat_and_cat_name', 
-        values='potential_points',
-        aggfunc='first',
-        fill_value=np.nan
-    )
-    
-    awarded_wide = data_to_process.pivot_table(
-        index=['building_name', 'leed_version'], 
-        columns='cat_and_cat_name', 
-        values='awarded_points',
-        aggfunc='first',
-        fill_value=np.nan
-    )
-    
-    ## reset index to make building_name and leed_version regular columns
-    potential_wide = potential_wide.reset_index()
-    awarded_wide = awarded_wide.reset_index()
-    
-    ## create the final dataframe by merging potential and awarded
-    result = potential_wide[['building_name', 'leed_version']].copy()
-    
-    ## add columns for each category with both potential and awarded
-    for col in potential_wide.columns[2:]:  # skip building_name and leed_version
-        # Add potential column (using nullable Int64 to preserve NaN values)
-        result[f"{col}_potential"] = potential_wide[col].astype('Int64')
-        # Add awarded column (using nullable Int64 to preserve NaN values)
-        result[f"{col}_awarded"] = awarded_wide[col].astype('Int64')
-    
-    print(f"Final result shape: {result.shape}")
-    return result
+# Building verification levels mapping
+VERIFICATION_LEVELS = {
+    'Lemon and Hardy Halls': 'Certified',
+    'Rec Center Renovations': 'Certified',
+    'Cohen Career Center': 'Gold',
+    'Miller Hall (Mason School of Business': 'Gold',
+    'School of Education': 'Gold',
+    'Tucker Hall': 'Gold',
+    'Chancellors Hall': 'Gold',
+    'ISC 3': 'Gold',
+    'Landrum Hall': 'Silver',
+    'Marshall Wythe School of Law Addition': 'Silver',
+    'McLeod Tyler Wellness Center': 'Gold',
+    'Music Arts Center': 'Silver',
+    'PBK Memorial Hall': 'Silver',
+    'West Utility Plant': 'Gold',
+    'Greek Fraternity Community Building': 'Silver',
+    'House 620': 'Gold',
+    'House 630': 'Gold',
+    'House 640': 'Gold',
+    'Houses 660, 670, 710, 720, 730, 740, 750, 760': 'Gold',
+    'Alumni House Addition': 'Silver',
+    'Campus Living Center': 'Silver',
+    'Sadler West Expansion': 'Silver'
+}
 
 ## slightly modified to_wide variant that uses cat_code instead of cat_and_cat_name
 def to_wide_var(df, building_code=None):
@@ -133,30 +96,37 @@ def to_wide_var(df, building_code=None):
         # Add awarded column (using nullable Int64 to preserve NaN values)
         result[f"{col}"] = awarded_wide[col].astype('Int64')
     
+    ## append verification level to each building
+    result['verification_level'] = result['building_name'].map(VERIFICATION_LEVELS)
+    
     print(f"Final result shape: {result.shape}")
-    return result
-
-## provide a function to extract a specific building's data
+    return result## provide a function to extract a specific building's data
 def get_building_data(df, building_code):
     return df[df['building_code'] == building_code]
 
 ## provide a function to use to_wide for a specific group (eg set any category selection such as all buildings of a certain LEED version) 
 ## and pass it through the to_wide function
-def version_data(leed_version, df, function=to_wide):
+def version_data(leed_version, df, function=None):
+    if function is None:
+        function = to_wide_var
     version_df = df[df['leed_version'] == leed_version]
     return function(version_df)
 
 ## function to automatically seperate by leed_version and save each to a separate csv
-def breakdown_by_version(df, function=to_wide, output_dir=None):
+def breakdown_by_version(df, function=None, output_dir=None):
     """
     Split the dataframe by `leed_version` and save a wide CSV for each version.
 
     Parameters
     - df: pandas.DataFrame containing a 'leed_version' column
-    - function: transformation function to apply to each version (default: to_wide)
+    - function: transformation function to apply to each version (default: to_wide_var)
     - output_dir: path-like where per-version CSVs will be written. If None, uses
       the module-level DATA_DIR. Can be a str or Path.
     """
+    # Set default function
+    if function is None:
+        function = to_wide_var
+    
     # Resolve output directory
     if output_dir is None:
         outdir = DATA_DIR / "final_wide_data"
